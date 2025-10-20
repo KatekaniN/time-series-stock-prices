@@ -58,6 +58,12 @@ Notes:
 - Streamlit settings are in `.streamlit/config.toml` (headless enabled for servers).
 - This app uses yfinance (no API key). If you add external APIs, set secrets via platform settings.
 
+#### One‑click deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/KatekaniN/time-series-stock-prices)
+
+Advanced: Render also supports a blueprint file (`render.yaml`) in this repo for reproducible infra.
+
 The dashboard will open in your browser at `http://localhost:8501`
 
 ## How to Use
