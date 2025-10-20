@@ -38,32 +38,6 @@ Run the Streamlit app:
 streamlit run app.py
 ```
 
-## Deploy options
-
-### 1) Streamlit Community Cloud (fastest)
-1. Push the repo to GitHub (already done).
-2. Go to https://share.streamlit.io/ and click "New app".
-3. Select this repo and set the main file as `app.py`.
-4. Optional: In "Advanced settings", set Python version to 3.12+ and add any environment variables.
-
-### 2) Render (free tier)
-1. Create a new Web Service.
-2. Connect your GitHub repo and pick this project.
-3. Set Runtime to Python, and add this `Procfile` automatically detected:
-	- `web: sh -c "python -m pip install -r requirements.txt && python -m streamlit run app.py --server.port $PORT --server.address 0.0.0.0"`
-4. Set environment to use Python 3.12 or later.
-5. Deploy; Render will install dependencies and run Streamlit.
-
-Notes:
-- Streamlit settings are in `.streamlit/config.toml` (headless enabled for servers).
-- This app uses yfinance (no API key). If you add external APIs, set secrets via platform settings.
-
-#### One‑click deploy to Render
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/KatekaniN/time-series-stock-prices)
-
-Advanced: Render also supports a blueprint file (`render.yaml`) in this repo for reproducible infra.
-
 The dashboard will open in your browser at `http://localhost:8501`
 
 ## How to Use
@@ -91,9 +65,6 @@ The project uses **Facebook Prophet**, which is designed for:
 - Automatic detection of trends and seasonality
 - Easy-to-interpret forecasts with uncertainty intervals
 
-## Screenshots
-
-(Add screenshots of your dashboard here when running)
 
 ## Future Enhancements
 
@@ -109,7 +80,7 @@ This project is for educational purposes only. Stock market predictions are inhe
 
 ## License
 
-MIT License - Feel free to use this for your portfolio!
+MIT License
 
 ## Author
 
