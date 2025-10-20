@@ -455,6 +455,24 @@ st.plotly_chart(fig_hist, use_container_width=True)
 
 st.markdown("---")
 
+# Fallback forecast helper (when Prophet backend is unavailable)
+def _naive_forecast(df: pd.DataFrame, horizon_days: int) -> pd.DataFrame:
+    """Generate a simple constant forecast with an uncertainty band using recent volatility."""
+    last_date = pd.to_datetime(df['Date'].iloc[-1])
+    last_price = float(df['Close'].iloc[-1])
+    # Use rolling 20-day volatility of returns as uncertainty proxy
+    pct_vol = float(df['Close'].pct_change().rolling(20).std().iloc[-1] or 0.02)
+    ci = last_price * pct_vol * 1.96
+    future_ds = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon_days, freq='D')
+    out = pd.DataFrame({
+        'ds': future_ds,
+        'yhat': last_price,
+        'yhat_lower': last_price - ci,
+        'yhat_upper': last_price + ci,
+        'trend': last_price
+    })
+    return out
+
 # Prepare data for Prophet
 df_train = data[['Date', 'Close']].copy()
 df_train.columns = ['ds', 'y']
@@ -464,20 +482,27 @@ df_train['ds'] = pd.to_datetime(df_train['ds'], errors='coerce')
 if getattr(df_train['ds'].dtype, 'tz', None) is not None:
     df_train['ds'] = df_train['ds'].dt.tz_localize(None)
 
-# Train Prophet model (with minimal UI)
+prophet_ok = True
+model = None
 with st.spinner("Training forecasting model..."):
-    model = Prophet(
-        daily_seasonality=True,
-        yearly_seasonality=True,
-        weekly_seasonality=True,
-        changepoint_prior_scale=changepoint_prior,
-        seasonality_mode=seasonality_mode
-    )
-    model.fit(df_train)
-
-# Make predictions
-future = model.make_future_dataframe(periods=forecast_days)
-forecast = model.predict(future)
+    try:
+        model = Prophet(
+            daily_seasonality=True,
+            yearly_seasonality=True,
+            weekly_seasonality=True,
+            changepoint_prior_scale=changepoint_prior,
+            seasonality_mode=seasonality_mode
+        )
+        model.fit(df_train)
+        future = model.make_future_dataframe(periods=forecast_days)
+        forecast = model.predict(future)
+    except Exception as e:
+        prophet_ok = False
+        st.warning(
+            "Prophet backend is unavailable in this environment. Showing a simple fallback forecast instead.\n\n"
+            "Tip: On Render, set PYTHON_VERSION to 3.12 (not 3.13) and redeploy to enable Prophet."
+        )
+        forecast = _naive_forecast(data, forecast_days)
 
 st.markdown("---")
 
@@ -485,68 +510,96 @@ st.markdown("---")
 h2(f"{forecast_days}-Day Price Forecast", "forecast")
 st.caption("AI prediction with confidence intervals - lighter shading shows uncertainty range")
 
-# Plot forecast
-fig_forecast = plot_plotly(model, forecast)
-fig_forecast.update_traces(
-    line=dict(color=profile['color'], width=3),
-    selector=dict(name='Actual')
-)
-fig_forecast.update_layout(
-    height=550,
-    plot_bgcolor='rgba(0,0,0,0)',
-    paper_bgcolor='rgba(0,0,0,0)',
-    template='plotly_white',
-)
-st.plotly_chart(fig_forecast, use_container_width=True)
+if prophet_ok:
+    # Plot Prophet forecast
+    fig_forecast = plot_plotly(model, forecast)
+    fig_forecast.update_traces(
+        line=dict(color=profile['color'], width=3),
+        selector=dict(name='Actual')
+    )
+    fig_forecast.update_layout(
+        height=550,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        template='plotly_white',
+    )
+    st.plotly_chart(fig_forecast, use_container_width=True)
+else:
+    # Plot fallback: historical close + flat forecast with band
+    fig_fallback = go.Figure()
+    fig_fallback.add_trace(go.Scatter(
+        x=data['Date'], y=data['Close'], name='Close',
+        mode='lines', line=dict(color=profile['color'], width=2.5)
+    ))
+    # Confidence band
+    fig_fallback.add_trace(go.Scatter(
+        x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
+        y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
+        fill='toself', fillcolor='rgba(79,70,229,0.12)', line=dict(color='rgba(0,0,0,0)'),
+        hoverinfo='skip', showlegend=True, name='Uncertainty'
+    ))
+    fig_fallback.add_trace(go.Scatter(
+        x=forecast['ds'], y=forecast['yhat'], name='Forecast',
+        mode='lines', line=dict(color='#555', width=2, dash='dot')
+    ))
+    fig_fallback.update_layout(
+        height=550,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        template='plotly_white',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0)
+    )
+    st.plotly_chart(fig_fallback, use_container_width=True)
 
 # Simple backtest on recent history
-with st.expander("Model Backtest (last 60 days)", expanded=False):
-    try:
-        st.markdown(
-            """
-            This quick check compares the model's recent predictions to actual prices:
-            - MAE: Average absolute error in dollars (lower is better)
-            - MAPE: Average percentage error (lower is better)
-            """
-        )
-        test_days = 60 if len(df_train) > 180 else max(30, min(60, len(df_train)//5))
-        if len(df_train) > test_days + 30:
-            df_train_bt = df_train.iloc[:-test_days]
-            model_bt = Prophet(
-                daily_seasonality=True,
-                yearly_seasonality=True,
-                weekly_seasonality=True,
-                changepoint_prior_scale=changepoint_prior,
-                seasonality_mode=seasonality_mode
+if prophet_ok:
+    with st.expander("Model Backtest (last 60 days)", expanded=False):
+        try:
+            st.markdown(
+                """
+                This quick check compares the model's recent predictions to actual prices:
+                - MAE: Average absolute error in dollars (lower is better)
+                - MAPE: Average percentage error (lower is better)
+                """
             )
-            model_bt.fit(df_train_bt)
-            future_bt = model_bt.make_future_dataframe(periods=test_days)
-            forecast_bt = model_bt.predict(future_bt)
-            # Align with actuals
-            actual_bt = df_train.tail(test_days).set_index('ds')
-            pred_bt = forecast_bt.tail(test_days).set_index('ds')
-            comp = actual_bt[['y']].join(pred_bt[['yhat']], how='inner')
-            mae = float(np.mean(np.abs(comp['y'] - comp['yhat'])))
-            mape = float(np.mean(np.abs((comp['y'] - comp['yhat']) / comp['y'])) * 100)
+            test_days = 60 if len(df_train) > 180 else max(30, min(60, len(df_train)//5))
+            if len(df_train) > test_days + 30:
+                df_train_bt = df_train.iloc[:-test_days]
+                model_bt = Prophet(
+                    daily_seasonality=True,
+                    yearly_seasonality=True,
+                    weekly_seasonality=True,
+                    changepoint_prior_scale=changepoint_prior,
+                    seasonality_mode=seasonality_mode
+                )
+                model_bt.fit(df_train_bt)
+                future_bt = model_bt.make_future_dataframe(periods=test_days)
+                forecast_bt = model_bt.predict(future_bt)
+                # Align with actuals
+                actual_bt = df_train.tail(test_days).set_index('ds')
+                pred_bt = forecast_bt.tail(test_days).set_index('ds')
+                comp = actual_bt[['y']].join(pred_bt[['yhat']], how='inner')
+                mae = float(np.mean(np.abs(comp['y'] - comp['yhat'])))
+                mape = float(np.mean(np.abs((comp['y'] - comp['yhat']) / comp['y'])) * 100)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Backtest MAE (USD)", f"${mae:.2f}")
-            with c2:
-                st.metric("Backtest MAPE", f"{mape:.2f}%")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Backtest MAE (USD)", f"${mae:.2f}")
+                with c2:
+                    st.metric("Backtest MAPE", f"{mape:.2f}%")
 
-            fig_bt = go.Figure()
-            fig_bt.add_trace(go.Scatter(x=comp.index, y=comp['y'], name='Actual',
-                                        line=dict(color=profile['color'], width=2)))
-            fig_bt.add_trace(go.Scatter(x=comp.index, y=comp['yhat'], name='Predicted',
-                                        line=dict(color='#555', width=2, dash='dot')))
-            fig_bt.update_layout(height=300, template='plotly_white',
-                                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_bt, use_container_width=True)
-        else:
-            st.caption("Not enough data for a meaningful backtest.")
-    except Exception as e:
-        st.caption("Backtest unavailable: " + str(e))
+                fig_bt = go.Figure()
+                fig_bt.add_trace(go.Scatter(x=comp.index, y=comp['y'], name='Actual',
+                                            line=dict(color=profile['color'], width=2)))
+                fig_bt.add_trace(go.Scatter(x=comp.index, y=comp['yhat'], name='Predicted',
+                                            line=dict(color='#555', width=2, dash='dot')))
+                fig_bt.update_layout(height=300, template='plotly_white',
+                                     plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig_bt, use_container_width=True)
+            else:
+                st.caption("Not enough data for a meaningful backtest.")
+        except Exception as e:
+            st.caption("Backtest unavailable: " + str(e))
 
 # Investment Insights & Recommendations
 st.markdown("---")
@@ -645,12 +698,13 @@ st.info(
 
 st.markdown("---")
 
-# Plot components
-h2("Deep Dive: Market Pattern Analysis", "patterns")
-st.caption("Breaking down the price movement into underlying patterns and seasonality")
-from prophet.plot import plot_components_plotly
-fig_components = plot_components_plotly(model, forecast)
-st.plotly_chart(fig_components, use_container_width=True)
+if prophet_ok:
+    # Plot components (Prophet only)
+    h2("Deep Dive: Market Pattern Analysis", "patterns")
+    st.caption("Breaking down the price movement into underlying patterns and seasonality")
+    from prophet.plot import plot_components_plotly
+    fig_components = plot_components_plotly(model, forecast)
+    st.plotly_chart(fig_components, use_container_width=True)
 
 with st.expander("How to Read This Chart"):
     st.markdown("""
