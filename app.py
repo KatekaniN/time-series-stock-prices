@@ -465,7 +465,7 @@ if getattr(df_train['ds'].dtype, 'tz', None) is not None:
     df_train['ds'] = df_train['ds'].dt.tz_localize(None)
 
 # Train Prophet model (with minimal UI)
-with st.spinner("Training AI forecasting model..."):
+with st.spinner("Training forecasting model..."):
     model = Prophet(
         daily_seasonality=True,
         yearly_seasonality=True,

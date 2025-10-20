@@ -4,3 +4,5 @@ prophet>=1.1.5
 yfinance>=0.2.40
 plotly>=5.18.0
 numpy>=1.26.0
+dash>=2.17.0
+gunicorn>=21.2.0

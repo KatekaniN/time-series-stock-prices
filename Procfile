@@ -1,1 +1,1 @@
-web: sh -c "python -m pip install -r requirements.txt && python -m streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
+web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
